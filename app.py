@@ -8,55 +8,58 @@ import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# =====================================================
-# 1. CONFIGURATION
-# =====================================================
-
 load_dotenv()
+
+# ==================================================
+# 1. PAGE CONFIGURATION
+# ==================================================
 
 st.set_page_config(
     page_title="Student AI Assistant",
     page_icon="🎓",
-    layout="wide"
+    layout="wide",
 )
 
-# Read credentials from Streamlit Secrets or local .env.
+# ==================================================
+# 2. AI/ML API CONFIGURATION
+# ==================================================
+
 try:
     API_KEY = st.secrets.get(
-        "GROK_API_KEY",
-        os.getenv("GROK_API_KEY", "")
+        "AIMLAPI_API_KEY",
+        os.getenv("AIMLAPI_API_KEY", ""),
     )
     SECRET_MODEL = st.secrets.get(
-        "GROK_MODEL",
-        os.getenv("GROK_MODEL", "")
+        "AIMLAPI_MODEL",
+        os.getenv("AIMLAPI_MODEL", ""),
     )
 except Exception:
-    API_KEY = os.getenv("GROK_API_KEY", "")
-    SECRET_MODEL = os.getenv("GROK_MODEL", "")
+    API_KEY = os.getenv("AIMLAPI_API_KEY", "")
+    SECRET_MODEL = os.getenv("AIMLAPI_MODEL", "")
 
-# The model name must be available to your xAI API account.
-MODEL_NAME = SECRET_MODEL or "grok-4-1-fast"
+BASE_URL = "https://api.aimlapi.com/v1"
 
-GROK_BASE_URL = "https://api.x.ai/v1"
+# Change this if the model is not available in your account.
+MODEL_NAME = SECRET_MODEL or "openai/gpt-5.6-sol"
 
 
-# =====================================================
-# 2. API CLIENT
-# =====================================================
+# ==================================================
+# 3. API CLIENT
+# ==================================================
 
 @st.cache_resource
 def get_client(api_key):
     return OpenAI(
         api_key=api_key,
-        base_url=GROK_BASE_URL,
-        timeout=45.0,
-        max_retries=1
+        base_url=BASE_URL,
+        timeout=60.0,
+        max_retries=1,
     )
 
 
-# =====================================================
-# 3. SAFE CALCULATOR
-# =====================================================
+# ==================================================
+# 4. SAFE CALCULATOR
+# ==================================================
 
 ALLOWED_OPERATORS = {
     ast.Add: operator.add,
@@ -71,8 +74,6 @@ ALLOWED_OPERATORS = {
 
 
 def safe_calculate(expression):
-    """Evaluate basic arithmetic without using eval()."""
-
     if len(expression) > 100:
         raise ValueError("Expression is too long.")
 
@@ -80,9 +81,19 @@ def safe_calculate(expression):
 
     def evaluate(node):
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, (int, float)):
+            if type(node.value) in (int, float):
                 return node.value
             raise ValueError("Only numbers are allowed.")
+
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+
+            if op_type not in ALLOWED_OPERATORS:
+                raise ValueError("Operator not allowed.")
+
+            return ALLOWED_OPERATORS[op_type](
+                evaluate(node.operand)
+            )
 
         if isinstance(node, ast.BinOp):
             op_type = type(node.op)
@@ -104,47 +115,37 @@ def safe_calculate(expression):
 
             return result
 
-        if isinstance(node, ast.UnaryOp):
-            op_type = type(node.op)
-
-            if op_type not in ALLOWED_OPERATORS:
-                raise ValueError("Operator not allowed.")
-
-            return ALLOWED_OPERATORS[op_type](evaluate(node.operand))
-
         raise ValueError("Invalid mathematical expression.")
 
     return evaluate(tree.body)
 
 
-# =====================================================
-# 4. SESSION STATE
-# =====================================================
+# ==================================================
+# 5. SESSION STATE
+# ==================================================
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-# =====================================================
-# 5. SIDEBAR
-# =====================================================
+# ==================================================
+# 6. SIDEBAR
+# ==================================================
 
 with st.sidebar:
     st.title("🎓 Student AI Assistant")
 
     st.write(
-        "Your AI study companion for academic learning, "
-        "programming, mathematics, and exam preparation."
+        "Your AI study companion for learning, programming, "
+        "mathematics, science, and examination preparation."
     )
 
     st.divider()
 
-    response_style = st.selectbox(
-        "Choose Answer Style",
-        ["Simple", "Detailed", "Exam Answer"]
+    answer_style = st.selectbox(
+        "Answer Style",
+        ["Simple", "Detailed", "Exam Answer"],
     )
-
-    st.divider()
 
     if st.button("🧹 Clear Chat", use_container_width=True):
         st.session_state.messages = []
@@ -164,80 +165,79 @@ with st.sidebar:
             data=chat_text.getvalue(),
             file_name="student_ai_chat.txt",
             mime="text/plain",
-            use_container_width=True
+            use_container_width=True,
         )
 
     st.divider()
-    st.caption("AI provider: Grok by xAI")
+    st.caption("Powered by AI/ML API")
 
 
-# =====================================================
-# 6. MAIN INTERFACE
-# =====================================================
+# ==================================================
+# 7. MAIN INTERFACE
+# ==================================================
 
 st.title("🎓 Student AI Assistant")
 
-st.markdown(
-    "Ask questions, understand difficult concepts, solve "
-    "mathematical problems, and prepare for examinations."
+st.write(
+    "Ask questions, understand difficult concepts, "
+    "solve mathematical problems, and prepare for exams."
 )
 
 st.caption(
-    "Examples: Explain cloud computing | What is Python? | "
+    "Try: Explain cloud computing | Explain Python loops | "
     "Calculate: 25 * 4"
 )
 
 
-# =====================================================
-# 7. DISPLAY PREVIOUS MESSAGES
-# =====================================================
+# ==================================================
+# 8. DISPLAY CHAT HISTORY
+# ==================================================
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 
-# =====================================================
-# 8. RESPONSE STYLE INSTRUCTIONS
-# =====================================================
+# ==================================================
+# 9. RESPONSE STYLES
+# ==================================================
 
 STYLE_INSTRUCTIONS = {
     "Simple": (
-        "Explain in simple English. Use short sentences, "
-        "easy words, and examples suitable for a student."
+        "Use simple English, short sentences, and easy examples. "
+        "Explain technical words clearly."
     ),
     "Detailed": (
-        "Provide a detailed and organized explanation. "
-        "Include examples, important concepts, and practical uses."
+        "Provide a detailed explanation with headings, examples, "
+        "important concepts, and practical applications."
     ),
     "Exam Answer": (
-        "Prepare an exam-ready answer with a definition, "
-        "headings, key points, examples where useful, and a "
-        "conclusion when appropriate."
-    )
+        "Write an exam-ready answer using a definition, headings, "
+        "numbered points, examples where useful, and a conclusion "
+        "when appropriate."
+    ),
 }
 
 
-# =====================================================
-# 9. CHAT PROCESSING
-# =====================================================
+# ==================================================
+# 10. PROCESS USER QUESTION
+# ==================================================
 
-user_prompt = st.chat_input("Ask your study question here...")
+user_prompt = st.chat_input("Ask your study question...")
 
 if user_prompt:
 
-    # Save and display the question.
     st.session_state.messages.append({
         "role": "user",
-        "content": user_prompt
+        "content": user_prompt,
     })
 
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
-    # ---------------------------------------------
-    # Calculator
-    # ---------------------------------------------
+    # ----------------------------------------------
+    # A. CALCULATOR — NO API REQUIRED
+    # ----------------------------------------------
 
     if user_prompt.lower().startswith("calculate:"):
 
@@ -249,7 +249,6 @@ if user_prompt:
                 f"**Expression:** `{expression}`\n\n"
                 f"**Result:** {result}"
             )
-
         except Exception as error:
             answer = f"Unable to calculate: {error}"
 
@@ -258,140 +257,131 @@ if user_prompt:
 
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer
+            "content": answer,
         })
 
-    # ---------------------------------------------
-    # Missing API key
-    # ---------------------------------------------
+    # ----------------------------------------------
+    # B. CHECK API KEY
+    # ----------------------------------------------
 
     elif not API_KEY:
 
         answer = (
-            "⚠️ **Grok API key is missing.**\n\n"
-            "Open Streamlit Cloud → your app → Settings → Secrets "
-            "and add `GROK_API_KEY`."
+            "The AI/ML API key is missing.\n\n"
+            "Open Streamlit Cloud → App Settings → Secrets "
+            "and add `AIMLAPI_API_KEY`."
         )
 
         with st.chat_message("assistant"):
-            st.warning(answer)
+            st.error(answer)
 
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer
+            "content": answer,
         })
 
-    # ---------------------------------------------
-    # Grok API request
-    # ---------------------------------------------
+    # ----------------------------------------------
+    # C. CALL AI/ML API
+    # ----------------------------------------------
 
     else:
 
         with st.chat_message("assistant"):
-            with st.spinner("Grok is generating your answer..."):
+            with st.spinner("Preparing your answer..."):
 
                 try:
                     client = get_client(API_KEY)
 
                     system_prompt = (
-                        "You are Student AI Assistant, a helpful "
-                        "educational assistant. Help students with "
-                        "academic subjects, programming, mathematics, "
-                        "science, and examination preparation. "
-                        "Be accurate, clear, and honest about uncertainty. "
+                        "You are Student AI Assistant, an educational "
+                        "assistant helping students with academic subjects, "
+                        "programming, mathematics, science, and examinations. "
+                        "Give clear, accurate, well-organized answers. "
                         "Do not invent facts or references. "
-                        f"{STYLE_INSTRUCTIONS[response_style]}"
+                        "Admit uncertainty when necessary. "
+                        f"Answer style: {STYLE_INSTRUCTIONS[answer_style]}"
                     )
 
-                    # Include recent conversation context.
                     recent_messages = st.session_state.messages[-12:]
 
                     api_messages = [
                         {
                             "role": "system",
-                            "content": system_prompt
+                            "content": system_prompt,
                         }
                     ] + recent_messages
 
                     response = client.chat.completions.create(
                         model=MODEL_NAME,
-                        messages=api_messages
+                        messages=api_messages,
                     )
 
                     answer = response.choices[0].message.content
 
                     if not answer:
                         answer = (
-                            "Grok returned an empty response. "
-                            "Please try asking your question again."
+                            "The model returned an empty answer. "
+                            "Please try again."
                         )
 
                     st.markdown(answer)
 
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": answer
+                        "content": answer,
                     })
-
-                # ---------------------------------
-                # Detailed API error handling
-                # ---------------------------------
 
                 except Exception as error:
 
-                    error_details = str(error)
-                    error_code = getattr(error, "status_code", None)
+                    status = getattr(error, "status_code", None)
+                    body = getattr(error, "body", None)
 
-                    if error_code == 400:
-                        answer = (
-                            "❌ **Grok rejected the API request (400).**\n\n"
-                            "Possible causes include an unsupported model "
-                            "or an invalid request. Check the model name "
-                            "in Streamlit Secrets.\n\n"
-                            f"**Actual error:** `{error_details[:1500]}`"
-                        )
-
-                    elif error_code == 401:
-                        answer = (
-                            "❌ **Authentication failed (401).**\n\n"
-                            "Check that `GROK_API_KEY` contains a valid "
-                            "xAI API key. Do not use an OpenAI API key here."
-                        )
-
-                    elif error_code == 403:
-                        answer = (
-                            "❌ **Access denied (403).**\n\n"
-                            "Your account may not have permission to use "
-                            "this model or API service. Check your xAI "
-                            "Console account and model access."
-                        )
-
-                    elif error_code == 404:
-                        answer = (
-                            "❌ **Resource not found (404).**\n\n"
-                            "Check the model name and API endpoint."
-                        )
-
-                    elif error_code == 429:
-                        answer = (
-                            "⚠️ **API usage limit or credit issue (429).**\n\n"
-                            "Check your xAI Console credits, billing, "
-                            "and rate limits."
-                        )
-
+                    if body is not None:
+                        details = str(body)
                     else:
-                        answer = (
-                            "❌ **Unable to get a response from Grok.**\n\n"
-                            "Check your API key, internet connection, "
-                            "account access, and model availability.\n\n"
-                            f"**Error code:** `{error_code}`\n\n"
-                            f"**Actual error:** `{error_details[:1500]}`"
+                        details = str(error)
+
+                    if status == 400:
+                        heading = (
+                            "The request was rejected. Check the model ID "
+                            "and the model's supported request format."
                         )
+                    elif status == 401:
+                        heading = (
+                            "Authentication failed. Check your AI/ML API key."
+                        )
+                    elif status == 403:
+                        heading = (
+                            "Access denied. Your account may not have "
+                            "permission to use this model."
+                        )
+                    elif status == 404:
+                        heading = (
+                            "The model or endpoint was not found. "
+                            "Verify the model ID in the AI/ML API catalogue."
+                        )
+                    elif status == 429:
+                        heading = (
+                            "The API usage limit was reached. "
+                            "Check your account credits and rate limits."
+                        )
+                    else:
+                        heading = (
+                            "The API request failed. Check your credentials, "
+                            "account access, network, and model configuration."
+                        )
+
+                    answer = (
+                        f"**API Error (HTTP {status}):**\n\n"
+                        f"{heading}\n\n"
+                        f"**Error details:**\n```text\n"
+                        f"{details[:2000]}\n```"
+                    )
 
                     st.error(answer)
 
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": answer
+                        "content": answer,
                     })
 
