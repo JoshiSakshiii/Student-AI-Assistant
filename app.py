@@ -8,6 +8,7 @@ import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
 
+
 # --------------------------------------------------
 # 1. APPLICATION CONFIGURATION
 # --------------------------------------------------
@@ -19,16 +20,16 @@ st.set_page_config(
 
 load_dotenv()
 
-MODEL_NAME = os.getenv("GROK_MODEL", "grok-3")
-GROK_BASE_URL = "https://api.x.ai/v1"
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 try:
     API_KEY = st.secrets.get(
-        "XAI_API_KEY",
-        os.getenv("XAI_API_KEY", ""),
+        "OPENAI_API_KEY",
+        os.getenv("OPENAI_API_KEY", ""),
     )
 except Exception:
-    API_KEY = os.getenv("XAI_API_KEY", "")
+    API_KEY = os.getenv("OPENAI_API_KEY", "")
+
 
 # --------------------------------------------------
 # 2. SYSTEM PROMPT
@@ -42,22 +43,25 @@ Your responsibilities:
 3. Explain difficult topics in simple language.
 4. Provide step-by-step explanations when requested.
 5. Give examples relevant to students.
-6. Adapt your answer to the requested response style.
+6. Adapt answers to the selected response style.
 7. Use earlier messages in the current conversation.
 8. If uncertain, explain the uncertainty.
 9. Never claim you executed code unless you actually did.
-10. Help students learn rather than simply memorize answers.
+10. Help students understand concepts instead of memorizing blindly.
 """
 
+
 # --------------------------------------------------
-# 3. INITIALIZE GROK CLIENT
+# 3. INITIALIZE OPENAI CLIENT
 # --------------------------------------------------
 @st.cache_resource
 def get_client(api_key):
     return OpenAI(
         api_key=api_key,
-        base_url=GROK_BASE_URL,
+        timeout=30.0,
+        max_retries=1,
     )
+
 
 # --------------------------------------------------
 # 4. SAFE CALCULATOR
@@ -74,8 +78,12 @@ ALLOWED_OPERATORS = {
     ast.UAdd: operator.pos,
 }
 
+
 def safe_calculate(expression):
-    """Evaluate basic arithmetic without using eval()."""
+    """Safely evaluate basic arithmetic without eval()."""
+
+    if not isinstance(expression, str) or len(expression) > 200:
+        raise ValueError("Enter a valid, shorter mathematical expression.")
 
     def evaluate(node):
         if isinstance(node, ast.Constant):
@@ -87,7 +95,7 @@ def safe_calculate(expression):
             operation = ALLOWED_OPERATORS.get(type(node.op))
 
             if operation is None:
-                raise ValueError("Operator not allowed.")
+                raise ValueError("This operator is not allowed.")
 
             left = evaluate(node.left)
             right = evaluate(node.right)
@@ -95,9 +103,18 @@ def safe_calculate(expression):
             if isinstance(node.op, ast.Pow) and abs(right) > 10:
                 raise ValueError("Exponent is too large.")
 
+            if isinstance(node.op, ast.Div) and right == 0:
+                raise ValueError("Cannot divide by zero.")
+
+            if isinstance(node.op, ast.FloorDiv) and right == 0:
+                raise ValueError("Cannot divide by zero.")
+
+            if isinstance(node.op, ast.Mod) and right == 0:
+                raise ValueError("Cannot divide by zero.")
+
             result = operation(left, right)
 
-            if not isinstance(result, (int, float)):
+            if type(result) not in (int, float):
                 raise ValueError("Invalid calculation.")
 
             if abs(result) > 1e100:
@@ -109,23 +126,21 @@ def safe_calculate(expression):
             operation = ALLOWED_OPERATORS.get(type(node.op))
 
             if operation is None:
-                raise ValueError("Unary operator not allowed.")
+                raise ValueError("This unary operator is not allowed.")
 
             return operation(evaluate(node.operand))
 
         raise ValueError("Invalid mathematical expression.")
 
-    if not isinstance(expression, str) or len(expression) > 200:
-        raise ValueError("Enter a shorter mathematical expression.")
-
     tree = ast.parse(expression, mode="eval")
     return evaluate(tree.body)
 
+
 # --------------------------------------------------
-# 5. PAGE HEADER
+# 5. PAGE HEADER AND SIDEBAR
 # --------------------------------------------------
 st.title("🎓 Student AI Assistant")
-st.caption("Your AI-powered learning companion, powered by Grok.")
+st.caption("Your AI-powered learning companion, powered by OpenAI.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -143,24 +158,27 @@ with st.sidebar:
 
     st.caption(f"Model: {MODEL_NAME}")
 
+
 # --------------------------------------------------
 # 6. INITIALIZE CHAT HISTORY
 # --------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+
 # --------------------------------------------------
-# 7. DISPLAY CHAT HISTORY
+# 7. DISPLAY PREVIOUS MESSAGES
 # --------------------------------------------------
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+
 # --------------------------------------------------
-# 8. CHAT INPUT AND GROK RESPONSE
+# 8. CHAT INPUT AND OPENAI RESPONSE
 # --------------------------------------------------
 user_input = st.chat_input(
-    "Ask a question about programming, computer science, or your studies..."
+    "Ask about programming, computer science, or your studies..."
 )
 
 if user_input:
@@ -174,25 +192,34 @@ if user_input:
     if not API_KEY:
         with st.chat_message("assistant"):
             st.error(
-                "Grok API key is missing. Add XAI_API_KEY "
-                "in Streamlit Cloud → Settings → Secrets."
+                "OpenAI API key is missing. Add OPENAI_API_KEY "
+                "under your Streamlit app's Secrets settings."
             )
+
     else:
         style_instructions = {
-            "Simple": "Explain in simple language with a clear example.",
-            "Detailed": "Provide a detailed explanation with examples and steps.",
+            "Simple": (
+                "Explain in simple language. Use short sentences "
+                "and an easy example."
+            ),
+            "Detailed": (
+                "Give a detailed explanation with steps, examples, "
+                "advantages, and limitations when relevant."
+            ),
             "Exam Answer": (
-                "Give a well-organized exam-style answer with a definition, "
-                "key points, an example, and a conclusion where appropriate."
+                "Write an exam-style answer with a definition, "
+                "organized key points, an example, and a conclusion."
             ),
         }
 
         messages = [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT
-                + "\n\nResponse style: "
-                + style_instructions[response_style],
+                "content": (
+                    SYSTEM_PROMPT
+                    + "\n\nSelected response style: "
+                    + style_instructions[response_style]
+                ),
             }
         ]
 
@@ -206,19 +233,18 @@ if user_input:
 
         try:
             with st.chat_message("assistant"):
-                with st.spinner("Grok is thinking..."):
+                with st.spinner("Thinking..."):
                     client = get_client(API_KEY)
 
                     response = client.chat.completions.create(
                         model=MODEL_NAME,
                         messages=messages,
-                        temperature=0.7,
                     )
 
                     answer = response.choices[0].message.content
 
                     if not answer:
-                        answer = "Grok returned an empty response. Please try again."
+                        answer = "The AI returned an empty response. Please try again."
 
                     st.markdown(answer)
 
@@ -228,14 +254,19 @@ if user_input:
 
         except Exception as error:
             with st.chat_message("assistant"):
-                st.error(
-                    "Unable to get a response from Grok. "
-                    "Check your API key, model access, and internet connection."
-                )
-                st.caption(f"Error details: {error}")
+                st.error("Unable to get a response from OpenAI.")
+
+                status_code = getattr(error, "status_code", None)
+
+                if status_code:
+                    st.write("HTTP status:", status_code)
+
+                st.write("Error type:", type(error).__name__)
+                st.code(str(error))
+
 
 # --------------------------------------------------
-# 9. EXPORT CONVERSATION
+# 9. DOWNLOAD CONVERSATION
 # --------------------------------------------------
 if st.session_state.messages:
     export_text = "\n\n".join(
