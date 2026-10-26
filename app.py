@@ -75,5 +75,5 @@ ALLOWED_OPERATORS = {
     ast.Div: operator.truediv,
     ast.Pow: operator.pow,
     ast.USub: operator.neg,
-    ast.UAdd: operator
+    ast.UAdd: operator }
 ```
