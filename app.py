@@ -1,4 +1,4 @@
-```python
+
 import os
 import ast
 import operator
@@ -312,4 +312,4 @@ if user_prompt:
                         "role": "assistant",
                         "content": answer
                     })
-```
+
